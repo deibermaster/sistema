@@ -1,3 +1,15 @@
+"""
+Servidor REST para la aplicación de escritorio.
+Este módulo implementa un servidor REST usando FastAPI que expone endpoints
+para obtener información sobre los procesos en ejecución y el catálogo actual.
+
+Características:
+- Endpoint para obtener lista de procesos en formato XML
+- Manejo automático de puertos disponibles
+- Actualización en tiempo real del estado de procesos
+- Integración con el catálogo de procesos
+"""
+
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import Response
 import xml.etree.ElementTree as ET
@@ -19,7 +31,19 @@ catalogo_actual: Dict = {
 }
 
 def encontrar_puerto_disponible(puerto_inicial: int = 8000, max_intentos: int = 20) -> int:
-    """Busca un puerto disponible empezando desde puerto_inicial"""
+    """
+    Busca un puerto disponible en el sistema.
+    
+    Args:
+        puerto_inicial (int): Puerto desde donde comenzar la búsqueda
+        max_intentos (int): Número máximo de puertos a intentar
+        
+    Returns:
+        int: Número de puerto disponible
+        
+    Raises:
+        RuntimeError: Si no se encuentra un puerto disponible
+    """
     # Primero, intentar liberar el puerto si está en uso
     for puerto in range(puerto_inicial, puerto_inicial + max_intentos):
         try:
@@ -52,14 +76,50 @@ def encontrar_puerto_disponible(puerto_inicial: int = 8000, max_intentos: int = 
     raise RuntimeError(f"No se pudo encontrar un puerto disponible después de {max_intentos} intentos")
 
 def actualizar_procesos(procesos: Dict[str, Any], catalogo_id: int, catalogo_nombre: str):
-    """Actualiza la lista de procesos en el servidor"""
+    """
+    Actualiza la lista de procesos en el servidor.
+    
+    Args:
+        procesos (Dict[str, Any]): Diccionario con la información de los procesos
+        catalogo_id (int): ID del catálogo actual
+        catalogo_nombre (str): Nombre del catálogo actual
+    """
     procesos_actuales['procesos'] = procesos
     procesos_actuales['catalogo_id'] = catalogo_id
     procesos_actuales['catalogo_nombre'] = catalogo_nombre
 
 @app.get("/procesos")
 def obtener_procesos():
-    """Retorna la lista de procesos en formato XML"""
+    """
+    Endpoint para obtener la lista de procesos en formato XML.
+    
+    Returns:
+        Response: Respuesta HTTP con el XML de procesos
+        
+    El XML generado tiene la siguiente estructura:
+    <procesos>
+        <proceso>
+            <pid>...</pid>
+            <nombre>...</nombre>
+            <usuario>...</usuario>
+            <descripcion>...</descripcion>
+            <prioridad>...</prioridad>
+            <estado>...</estado>
+            <t_llegada>...</t_llegada>
+            <t_final>...</t_final>
+            <rafaga_total>...</rafaga_total>
+            <rafaga_restante>...</rafaga_restante>
+            <num_ejecuciones>...</num_ejecuciones>
+            <turnaround>...</turnaround>
+            <historial>
+                <evento>
+                    <estado>...</estado>
+                    <duracion>...</duracion>
+                </evento>
+            </historial>
+        </proceso>
+    </procesos>
+    """
     root = ET.Element("procesos")
     
     for proc in procesos_actuales.get('procesos', []):
@@ -87,7 +147,12 @@ def obtener_procesos():
     return Response(content=xml_str, media_type="application/xml")
 
 def iniciar_servidor():
-    """Inicia el servidor REST en el puerto 5000"""
+    """
+    Inicia el servidor REST en el puerto 5000.
+    
+    Raises:
+        Exception: Si hay un error al iniciar el servidor
+    """
     try:
         puerto = 5000  # PUERTO FIJO
         print(f"Iniciando servidor REST en el puerto {puerto}")

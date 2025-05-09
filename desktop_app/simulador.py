@@ -1,3 +1,17 @@
+"""
+Simulador de procesos usando el algoritmo Round Robin.
+Este módulo implementa la lógica de simulación de procesos del sistema
+operativo utilizando el algoritmo Round Robin con soporte para procesos
+expulsivos y no expulsivos.
+
+Características:
+- Simulación en tiempo real con tiempos configurables
+- Soporte para pausar/reanudar/detener
+- Logging detallado de eventos
+- Manejo de colas de procesos
+- Cálculo de métricas de rendimiento
+"""
+
 from collections import deque
 import threading
 import time
@@ -6,7 +20,29 @@ from datetime import datetime
 from .proceso import Proceso
 
 class Simulador:
+    """
+    Simulador de procesos usando el algoritmo Round Robin.
+    
+    Attributes:
+        th (int): Tiempo de espera entre ejecuciones (en milisegundos)
+        quantum (int): Tiempo de quantum para cada proceso
+        cola_listos (deque): Cola de procesos listos para ejecutar
+        cola_ejecucion (deque): Cola de procesos en ejecución
+        cola_terminados (list): Lista de procesos terminados
+        tiempo_global (int): Tiempo actual de la simulación
+        pausa_event (Event): Evento para controlar pausas
+        simulacion_activa (bool): Estado de la simulación
+        callback (Optional[Callable]): Función para logging
+    """
+    
     def __init__(self, th: int, quantum: int):
+        """
+        Inicializa el simulador.
+        
+        Args:
+            th (int): Tiempo de espera entre ejecuciones (ms)
+            quantum (int): Tiempo de quantum para cada proceso
+        """
         self.th = th
         self.quantum = quantum
         self.cola_listos = deque()
@@ -19,13 +55,24 @@ class Simulador:
         self.callback: Optional[Callable] = None
         
     def log(self, mensaje: str):
-        """Registra un mensaje con timestamp"""
+        """
+        Registra un mensaje con timestamp.
+        
+        Args:
+            mensaje (str): Mensaje a registrar
+        """
         if self.callback:
             timestamp = datetime.now().strftime('%H:%M:%S.%f')[:-3]
             self.callback(f"[{timestamp}] {mensaje}")
         
     def iniciar(self, procesos: List[Proceso], callback: Optional[Callable] = None):
-        """Inicia la simulación con la lista de procesos"""
+        """
+        Inicia la simulación con la lista de procesos.
+        
+        Args:
+            procesos (List[Proceso]): Lista de procesos a simular
+            callback (Optional[Callable]): Función para logging
+        """
         self.callback = callback
         self.cola_listos = deque(procesos)
         self.cola_ejecucion.clear()
@@ -48,7 +95,17 @@ class Simulador:
         threading.Thread(target=self._ejecutar_simulacion, daemon=True).start()
         
     def _ejecutar_simulacion(self):
-        """Ejecuta la simulación en un hilo separado"""
+        """
+        Ejecuta la simulación en un hilo separado.
+        
+        En cada iteración:
+        1. Verifica si la simulación está pausada
+        2. Mueve procesos de listos a ejecución si hay espacio
+        3. Ejecuta el quantum del proceso actual
+        4. Maneja la terminación o interrupción del proceso
+        5. Actualiza el tiempo global
+        6. Verifica si la simulación ha terminado
+        """
         while self.simulacion_activa:
             self.pausa_event.wait()  # Esperar si está pausado
             
@@ -110,23 +167,28 @@ class Simulador:
                 self.log(f"Tiempo total: {self.tiempo_global}ms")
                     
     def pausar(self):
-        """Pausa la simulación"""
+        """Pausa la simulación actual."""
         self.pausa_event.clear()
         self.log("Simulación pausada")
         
     def reanudar(self):
-        """Reanuda la simulación"""
+        """Reanuda la simulación pausada."""
         self.pausa_event.set()
         self.log("Simulación reanudada")
         
     def detener(self):
-        """Detiene la simulación"""
+        """Detiene la simulación actual."""
         self.simulacion_activa = False
         self.pausa_event.set()
         self.log("Simulación detenida")
         
     def obtener_estado(self) -> dict:
-        """Retorna el estado actual de la simulación"""
+        """
+        Retorna el estado actual de la simulación.
+        
+        Returns:
+            dict: Diccionario con el estado actual de las colas y tiempo global
+        """
         return {
             'cola_listos': [p.to_dict() for p in self.cola_listos],
             'cola_ejecucion': [p.to_dict() for p in self.cola_ejecucion],

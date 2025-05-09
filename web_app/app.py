@@ -1,3 +1,16 @@
+"""
+Aplicación web para simulación de procesos usando el algoritmo Round Robin.
+Esta aplicación proporciona una interfaz web para simular la ejecución de procesos
+del sistema operativo utilizando el algoritmo Round Robin con prioridades.
+
+Características principales:
+- Integración con aplicación de escritorio para obtener procesos reales
+- Simulación de procesos con quantum y tiempo de espera configurables
+- Almacenamiento persistente de simulaciones en base de datos SQLite
+- API REST para controlar y monitorear simulaciones
+- Interfaz web para visualizar resultados
+"""
+
 import sys
 import os
 import json
@@ -19,16 +32,24 @@ from desktop_client import (
     DesktopResponseError
 )
 
-# Agregar el directorio raíz al path de Python
+# Agregar el directorio raíz al path de Python para importar módulos
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from models.simulacion import Simulador, ResultadoSimulacion
 from models.proceso import Proceso, EstadoProceso
 
-# --- Configuración de BD ---
+# --- Configuración de Base de Datos ---
 def init_db():
+    """
+    Inicializa la base de datos SQLite creando las tablas necesarias si no existen.
+    
+    Tablas creadas:
+    - simulaciones: Almacena información general de cada simulación
+    - resultados: Almacena los resultados detallados de cada proceso en la simulación
+    """
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
+        # Tabla para almacenar información general de simulaciones
         c.execute('''CREATE TABLE IF NOT EXISTS simulaciones (
             id INTEGER PRIMARY KEY AUTOINCREMENT,
             fecha TEXT,
@@ -36,6 +57,7 @@ def init_db():
             th INTEGER,
             estado TEXT
         )''')
+        # Tabla para almacenar resultados detallados de procesos
         c.execute('''CREATE TABLE IF NOT EXISTS resultados (
             sim_id INTEGER,
             pid INTEGER,
@@ -53,15 +75,27 @@ def init_db():
         conn.commit()
 init_db()
 
+# Inicialización de la aplicación Flask
 app = Flask(__name__)
 
 # Variables globales para el estado de la simulación
-simulaciones = {}  # id: {hilo, colas, ...}
-simulacion_id_counter = 1
-simulaciones_lock = threading.Lock()
+simulaciones = {}  # Diccionario que almacena el estado de cada simulación: {id: {hilo, colas, ...}}
+simulacion_id_counter = 1  # Contador para generar IDs únicos de simulación
+simulaciones_lock = threading.Lock()  # Lock para sincronización de acceso a simulaciones
 
-# --- Utilidades ---
+# --- Funciones de Utilidad para Base de Datos ---
 def guardar_simulacion_bd(quantum, th, estado):
+    """
+    Guarda una nueva simulación en la base de datos.
+    
+    Args:
+        quantum (int): Tiempo de quantum para la simulación
+        th (int): Tiempo de espera entre ejecuciones
+        estado (str): Estado inicial de la simulación
+    
+    Returns:
+        int: ID de la simulación creada
+    """
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         c.execute("INSERT INTO simulaciones (fecha, quantum, th, estado) VALUES (?, ?, ?, ?)",
@@ -71,6 +105,13 @@ def guardar_simulacion_bd(quantum, th, estado):
         return sim_id
 
 def guardar_resultados_bd(sim_id, procesos):
+    """
+    Guarda los resultados de los procesos de una simulación en la base de datos.
+    
+    Args:
+        sim_id (int): ID de la simulación
+        procesos (list): Lista de diccionarios con información de los procesos
+    """
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         for proc in procesos:
@@ -85,6 +126,15 @@ def guardar_resultados_bd(sim_id, procesos):
         conn.commit()
 
 def cargar_resultados_bd(sim_id):
+    """
+    Carga los resultados de una simulación desde la base de datos.
+    
+    Args:
+        sim_id (int): ID de la simulación
+    
+    Returns:
+        list: Lista de diccionarios con información de los procesos
+    """
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         c.execute("SELECT * FROM resultados WHERE sim_id=?", (sim_id,))
@@ -99,23 +149,40 @@ def cargar_resultados_bd(sim_id):
         return resultados
 
 def cargar_simulaciones_bd():
+    """
+    Carga el historial de todas las simulaciones desde la base de datos.
+    
+    Returns:
+        list: Lista de diccionarios con información de las simulaciones
+    """
     with sqlite3.connect(DB_PATH) as conn:
         c = conn.cursor()
         c.execute("SELECT id, fecha, quantum, th, estado FROM simulaciones ORDER BY id DESC")
         return [dict(zip(['id','fecha','quantum','th','estado'], row)) for row in c.fetchall()]
 
 def simular_round_robin(sim_id, procesos, th, quantum):
-    cola_listos = deque(procesos)
-    cola_ejecucion = deque()
-    cola_terminados = []
-    tiempo_global = 0
-    pausa_event = threading.Event()
+    """
+    Ejecuta la simulación del algoritmo Round Robin.
+    
+    Args:
+        sim_id (int): ID de la simulación
+        procesos (list): Lista de procesos a simular
+        th (int): Tiempo de espera entre ejecuciones (en milisegundos)
+        quantum (int): Tiempo de quantum para cada proceso
+    """
+    cola_listos = deque(procesos)  # Cola de procesos listos para ejecutar
+    cola_ejecucion = deque()  # Cola de procesos en ejecución
+    cola_terminados = []  # Lista de procesos terminados
+    tiempo_global = 0  # Contador de tiempo global
+    pausa_event = threading.Event()  # Evento para controlar pausas
     pausa_event.set()
     simulaciones[sim_id]['pausa_event'] = pausa_event
     simulaciones[sim_id]['estado'] = 'ejecutando'
     
     while simulaciones[sim_id]['estado'] == 'ejecutando' and (cola_listos or cola_ejecucion):
-        pausa_event.wait()
+        pausa_event.wait()  # Esperar si la simulación está pausada
+        
+        # Mover proceso de listos a ejecución si no hay ninguno ejecutándose
         if cola_listos and not cola_ejecucion:
             proceso = cola_listos.popleft()
             proceso['estado'] = "Ejecución"
@@ -124,10 +191,11 @@ def simular_round_robin(sim_id, procesos, th, quantum):
         if cola_ejecucion:
             proceso = cola_ejecucion[0]
             tiempo_ejecutado = min(quantum, proceso['rafaga_restante'])
-            time.sleep(tiempo_ejecutado * th / 1000)
+            time.sleep(tiempo_ejecutado * th / 1000)  # Simular tiempo de ejecución
             proceso['rafaga_restante'] -= tiempo_ejecutado
             proceso['historial'].append(("Ejecución", tiempo_ejecutado))
             
+            # Verificar si el proceso ha terminado
             if proceso['rafaga_restante'] <= 0:
                 proceso['estado'] = "Terminado"
                 proceso['t_final'] = tiempo_global + tiempo_ejecutado
@@ -135,6 +203,7 @@ def simular_round_robin(sim_id, procesos, th, quantum):
                 cola_terminados.append(proceso)
                 cola_ejecucion.popleft()
             else:
+                # Si no terminó, mover a la cola correspondiente según prioridad
                 cola_ejecucion.popleft()
                 if proceso['prioridad'] == 0:
                     proceso['estado'] = "Listo"
@@ -147,15 +216,20 @@ def simular_round_robin(sim_id, procesos, th, quantum):
     simulaciones[sim_id]['estado'] = 'finalizada'
     guardar_resultados_bd(sim_id, cola_terminados)
 
-# --- Rutas ---
+# --- Rutas de la API ---
 @app.route('/')
 def index():
-    """Renderiza la página principal"""
+    """Renderiza la página principal de la aplicación"""
     return render_template('index.html')
 
 @app.route('/api/procesos', methods=['GET'])
 def obtener_procesos():
-    """Obtiene la lista de procesos desde la aplicación de escritorio"""
+    """
+    Obtiene la lista de procesos desde la aplicación de escritorio.
+    
+    Returns:
+        JSON: Lista de procesos o mensaje de error
+    """
     try:
         procesos = fetch_procesos_desktop()
         return jsonify(procesos)
@@ -168,7 +242,19 @@ def obtener_procesos():
 
 @app.route('/api/simular', methods=['POST'])
 def simular():
-    """Inicia una nueva simulación"""
+    """
+    Inicia una nueva simulación de procesos.
+    
+    Parámetros de query:
+        th (int): Tiempo de espera entre ejecuciones
+        quantum (int): Tiempo de quantum para cada proceso
+    
+    Body JSON:
+        pids (list): Lista de PIDs de procesos a simular (opcional)
+    
+    Returns:
+        JSON: ID de la simulación o mensaje de error
+    """
     try:
         th = int(request.args.get('th', 100))
         quantum = int(request.args.get('quantum', 1))
@@ -209,7 +295,15 @@ def simular():
 
 @app.route('/api/simular/<int:sim_id>', methods=['GET'])
 def estado_simulacion(sim_id):
-    """Obtiene el estado actual de una simulación"""
+    """
+    Obtiene el estado actual de una simulación.
+    
+    Args:
+        sim_id (int): ID de la simulación
+    
+    Returns:
+        JSON: Estado de la simulación o mensaje de error
+    """
     with simulaciones_lock:
         sim = simulaciones.get(sim_id)
         if not sim:
@@ -218,7 +312,15 @@ def estado_simulacion(sim_id):
 
 @app.route('/api/simular/<int:sim_id>/pausar', methods=['POST'])
 def pausar_simulacion(sim_id):
-    """Pausa una simulación en curso"""
+    """
+    Pausa una simulación en curso.
+    
+    Args:
+        sim_id (int): ID de la simulación
+    
+    Returns:
+        JSON: Mensaje de confirmación o error
+    """
     with simulaciones_lock:
         sim = simulaciones.get(sim_id)
         if not sim:
@@ -229,7 +331,15 @@ def pausar_simulacion(sim_id):
 
 @app.route('/api/simular/<int:sim_id>/reiniciar', methods=['POST'])
 def reiniciar_simulacion(sim_id):
-    """Reinicia una simulación pausada"""
+    """
+    Reinicia una simulación pausada.
+    
+    Args:
+        sim_id (int): ID de la simulación
+    
+    Returns:
+        JSON: Mensaje de confirmación o error
+    """
     with simulaciones_lock:
         sim = simulaciones.get(sim_id)
         if not sim:
@@ -240,7 +350,15 @@ def reiniciar_simulacion(sim_id):
 
 @app.route('/api/resultados/<int:sim_id>', methods=['GET'])
 def resultados_simulacion(sim_id):
-    """Obtiene los resultados de una simulación"""
+    """
+    Obtiene los resultados de una simulación.
+    
+    Args:
+        sim_id (int): ID de la simulación
+    
+    Returns:
+        JSON: Resultados de la simulación o mensaje de error
+    """
     resultados = cargar_resultados_bd(sim_id)
     if not resultados:
         return jsonify({'error': 'No hay resultados para esta simulación'}), 404
@@ -248,23 +366,29 @@ def resultados_simulacion(sim_id):
 
 @app.route('/api/historicos', methods=['GET'])
 def historicos():
-    """Obtiene el historial de simulaciones"""
+    """
+    Obtiene el historial de todas las simulaciones.
+    
+    Returns:
+        JSON: Lista de simulaciones realizadas
+    """
     return jsonify(cargar_simulaciones_bd())
 
-# --- Manejador de errores ---
 @app.errorhandler(HTTPException)
 def handle_http_error(error):
-    """Maneja errores HTTP de forma consistente"""
-    response = jsonify({
+    """
+    Manejador global de errores HTTP.
+    
+    Args:
+        error (HTTPException): Error HTTP ocurrido
+    
+    Returns:
+        JSON: Mensaje de error formateado
+    """
+    return jsonify({
         'error': error.description,
         'code': error.code
-    })
-    response.status_code = error.code
-    return response
+    }), error.code
 
 if __name__ == '__main__':
-    app.run(
-        host=FLASK_HOST,
-        port=FLASK_PORT,
-        debug=FLASK_DEBUG
-    ) 
+    app.run(host=FLASK_HOST, port=FLASK_PORT, debug=FLASK_DEBUG) 
