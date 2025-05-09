@@ -1,7 +1,7 @@
 flask==3.0.2
 fastapi==0.110.0
 uvicorn==0.27.1
-requests==2.31.0
+requests==2.32.2
 python-dotenv==1.0.1
 sqlalchemy==2.0.28
 pytest==8.0.2
