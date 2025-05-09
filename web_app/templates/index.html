@@ -1,0 +1,453 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Simulador de Procesos</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link href="https://cdn.jsdelivr.net/npm/toastr@2.1.4/build/toastr.min.css" rel="stylesheet">
+    <style>
+        .process-card {
+            margin-bottom: 1rem;
+        }
+        .process-card.selected {
+            border-color: #0d6efd;
+            background-color: #f8f9fa;
+        }
+        .chart-container {
+            height: 400px;
+            margin-top: 2rem;
+        }
+        .loading-overlay {
+            position: fixed;
+            top: 0;
+            left: 0;
+            width: 100%;
+            height: 100%;
+            background: rgba(0,0,0,0.5);
+            display: none;
+            justify-content: center;
+            align-items: center;
+            z-index: 1000;
+        }
+        .loading-spinner {
+            color: white;
+            font-size: 2rem;
+        }
+    </style>
+</head>
+<body>
+    <div class="container mt-4">
+        <h1 class="mb-4">Simulador de Procesos</h1>
+        
+        <!-- Configuración -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">Configuración</h5>
+                <div class="row">
+                    <div class="col-md-4">
+                        <div class="mb-3">
+                            <label for="quantum" class="form-label">Quantum</label>
+                            <input type="number" class="form-control" id="quantum" value="1" min="1">
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="mb-3">
+                            <label for="th" class="form-label">Tiempo de Espera (ms)</label>
+                            <input type="number" class="form-control" id="th" value="100" min="0">
+                        </div>
+                    </div>
+                    <div class="col-md-4">
+                        <div class="mb-3">
+                            <label class="form-label">Modo</label>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="mode" id="liveMode" value="live" checked>
+                                <label class="form-check-label" for="liveMode">
+                                    Simulación en Vivo
+                                </label>
+                            </div>
+                            <div class="form-check">
+                                <input class="form-check-input" type="radio" name="mode" id="historyMode" value="history">
+                                <label class="form-check-label" for="historyMode">
+                                    Histórico
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <!-- Procesos -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">Procesos</h5>
+                <div id="processList" class="row">
+                    <!-- Los procesos se cargarán aquí -->
+                </div>
+            </div>
+        </div>
+
+        <!-- Controles -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">Controles</h5>
+                <button id="startBtn" class="btn btn-primary">Iniciar Simulación</button>
+                <button id="pauseBtn" class="btn btn-warning" disabled>Pausar</button>
+                <button id="resumeBtn" class="btn btn-success" disabled>Reanudar</button>
+                <button id="stopBtn" class="btn btn-danger" disabled>Detener</button>
+            </div>
+        </div>
+
+        <!-- Resultados -->
+        <div class="card mb-4">
+            <div class="card-body">
+                <h5 class="card-title">Resultados</h5>
+                <div id="results">
+                    <div class="table-responsive">
+                        <table class="table table-striped">
+                            <thead>
+                                <tr>
+                                    <th>PID</th>
+                                    <th>Nombre</th>
+                                    <th>Usuario</th>
+                                    <th>Prioridad</th>
+                                    <th>T. Llegada</th>
+                                    <th>Ráfaga Total</th>
+                                    <th>T. Final</th>
+                                    <th>Turnaround</th>
+                                    <th>Estado</th>
+                                </tr>
+                            </thead>
+                            <tbody id="resultsTable">
+                                <!-- Los resultados se cargarán aquí -->
+                            </tbody>
+                        </table>
+                    </div>
+                    <div id="ganttChart" class="chart-container"></div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- Loading Overlay -->
+    <div class="loading-overlay">
+        <div class="loading-spinner">
+            <div class="spinner-border" role="status">
+                <span class="visually-hidden">Cargando...</span>
+            </div>
+        </div>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/jquery@3.6.0/dist/jquery.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/toastr@2.1.4/build/toastr.min.js"></script>
+    <script src="https://cdn.plot.ly/plotly-latest.min.js"></script>
+    <script>
+        // Configuración de toastr
+        toastr.options = {
+            "closeButton": true,
+            "progressBar": true,
+            "positionClass": "toast-top-right",
+            "timeOut": "5000"
+        };
+
+        // Estado global
+        let currentSimulationId = null;
+        let selectedProcesses = new Set();
+        let isSimulationRunning = false;
+
+        // Funciones de utilidad
+        function showLoading() {
+            $('.loading-overlay').css('display', 'flex');
+        }
+
+        function hideLoading() {
+            $('.loading-overlay').css('display', 'none');
+        }
+
+        function showError(message) {
+            toastr.error(message);
+        }
+
+        function showSuccess(message) {
+            toastr.success(message);
+        }
+
+        function showWarning(message) {
+            toastr.warning(message);
+        }
+
+        // Cargar procesos
+        async function loadProcesses() {
+            try {
+                showLoading();
+                const response = await fetch('/api/procesos');
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Error al cargar procesos');
+                }
+                const processes = await response.json();
+                renderProcesses(processes);
+            } catch (error) {
+                showError(error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // Renderizar procesos
+        function renderProcesses(processes) {
+            const container = $('#processList');
+            container.empty();
+            
+            processes.forEach(process => {
+                const card = $(`
+                    <div class="col-md-4">
+                        <div class="card process-card" data-pid="${process.pid}">
+                            <div class="card-body">
+                                <h5 class="card-title">${process.nombre}</h5>
+                                <p class="card-text">
+                                    PID: ${process.pid}<br>
+                                    Usuario: ${process.usuario}<br>
+                                    Prioridad: ${process.prioridad}
+                                </p>
+                            </div>
+                        </div>
+                    </div>
+                `);
+                
+                card.find('.card').click(function() {
+                    const pid = $(this).data('pid');
+                    if (selectedProcesses.has(pid)) {
+                        selectedProcesses.delete(pid);
+                        $(this).removeClass('selected');
+                    } else {
+                        selectedProcesses.add(pid);
+                        $(this).addClass('selected');
+                    }
+                });
+                
+                container.append(card);
+            });
+        }
+
+        // Iniciar simulación
+        async function startSimulation() {
+            if (selectedProcesses.size === 0) {
+                showWarning('Selecciona al menos un proceso');
+                return;
+            }
+
+            try {
+                showLoading();
+                const quantum = parseInt($('#quantum').val());
+                const th = parseInt($('#th').val());
+                
+                const response = await fetch(`/api/simular?quantum=${quantum}&th=${th}`, {
+                    method: 'POST',
+                    headers: {
+                        'Content-Type': 'application/json'
+                    },
+                    body: JSON.stringify({
+                        pids: Array.from(selectedProcesses)
+                    })
+                });
+
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Error al iniciar simulación');
+                }
+
+                const data = await response.json();
+                currentSimulationId = data.simulation_id;
+                isSimulationRunning = true;
+                
+                updateControls();
+                startPolling();
+                showSuccess('Simulación iniciada');
+            } catch (error) {
+                showError(error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // Polling de estado
+        let pollingInterval = null;
+
+        function startPolling() {
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+            }
+            
+            pollingInterval = setInterval(async () => {
+                if (!currentSimulationId) return;
+                
+                try {
+                    const response = await fetch(`/api/simular/${currentSimulationId}`);
+                    if (!response.ok) {
+                        const error = await response.json();
+                        throw new Error(error.error || 'Error al consultar estado');
+                    }
+                    
+                    const data = await response.json();
+                    if (data.estado === 'finalizada') {
+                        clearInterval(pollingInterval);
+                        isSimulationRunning = false;
+                        updateControls();
+                        loadResults();
+                    }
+                } catch (error) {
+                    showError(error.message);
+                    clearInterval(pollingInterval);
+                }
+            }, 1000);
+        }
+
+        // Cargar resultados
+        async function loadResults() {
+            if (!currentSimulationId) return;
+            
+            try {
+                showLoading();
+                const response = await fetch(`/api/resultados/${currentSimulationId}`);
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Error al cargar resultados');
+                }
+                
+                const results = await response.json();
+                renderResults(results);
+            } catch (error) {
+                showError(error.message);
+            } finally {
+                hideLoading();
+            }
+        }
+
+        // Renderizar resultados
+        function renderResults(results) {
+            const tbody = $('#resultsTable');
+            tbody.empty();
+            
+            results.forEach(process => {
+                tbody.append(`
+                    <tr>
+                        <td>${process.pid}</td>
+                        <td>${process.nombre}</td>
+                        <td>${process.usuario}</td>
+                        <td>${process.prioridad}</td>
+                        <td>${process.t_llegada}</td>
+                        <td>${process.rafaga_total}</td>
+                        <td>${process.t_final}</td>
+                        <td>${process.turnaround}</td>
+                        <td>${process.estado}</td>
+                    </tr>
+                `);
+            });
+            
+            renderGanttChart(results);
+        }
+
+        // Renderizar diagrama de Gantt
+        function renderGanttChart(results) {
+            const tasks = [];
+            let currentTime = 0;
+            
+            results.forEach(process => {
+                process.historial.forEach(([estado, duracion]) => {
+                    tasks.push({
+                        Task: process.nombre,
+                        Start: currentTime,
+                        Finish: currentTime + duracion,
+                        Resource: estado
+                    });
+                    currentTime += duracion;
+                });
+            });
+            
+            const data = [{
+                type: 'bar',
+                x: tasks.map(t => t.Finish - t.Start),
+                y: tasks.map(t => t.Task),
+                base: tasks.map(t => t.Start),
+                orientation: 'h',
+                marker: {
+                    color: tasks.map(t => t.Resource === 'Ejecución' ? '#2ecc71' : '#e74c3c')
+                }
+            }];
+            
+            const layout = {
+                title: 'Diagrama de Gantt',
+                barmode: 'stack',
+                xaxis: {
+                    title: 'Tiempo'
+                },
+                yaxis: {
+                    title: 'Proceso'
+                }
+            };
+            
+            Plotly.newPlot('ganttChart', data, layout);
+        }
+
+        // Actualizar controles
+        function updateControls() {
+            $('#startBtn').prop('disabled', isSimulationRunning);
+            $('#pauseBtn').prop('disabled', !isSimulationRunning);
+            $('#resumeBtn').prop('disabled', !isSimulationRunning);
+            $('#stopBtn').prop('disabled', !isSimulationRunning);
+        }
+
+        // Event listeners
+        $('#startBtn').click(startSimulation);
+        
+        $('#pauseBtn').click(async () => {
+            try {
+                const response = await fetch(`/api/simular/${currentSimulationId}/pausar`, {
+                    method: 'POST'
+                });
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Error al pausar simulación');
+                }
+                showSuccess('Simulación pausada');
+            } catch (error) {
+                showError(error.message);
+            }
+        });
+        
+        $('#resumeBtn').click(async () => {
+            try {
+                const response = await fetch(`/api/simular/${currentSimulationId}/reiniciar`, {
+                    method: 'POST'
+                });
+                if (!response.ok) {
+                    const error = await response.json();
+                    throw new Error(error.error || 'Error al reanudar simulación');
+                }
+                showSuccess('Simulación reanudada');
+            } catch (error) {
+                showError(error.message);
+            }
+        });
+        
+        $('#stopBtn').click(() => {
+            if (pollingInterval) {
+                clearInterval(pollingInterval);
+            }
+            currentSimulationId = null;
+            isSimulationRunning = false;
+            updateControls();
+            showWarning('Simulación detenida');
+        });
+
+        // Inicialización
+        $(document).ready(() => {
+            loadProcesses();
+            updateControls();
+        });
+    </script>
+</body>
+</html> 
