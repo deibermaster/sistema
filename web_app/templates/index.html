@@ -116,6 +116,7 @@
                                     <th>Ráfaga Total</th>
                                     <th>T. Final</th>
                                     <th>Turnaround</th>
+                                    <th>Unidades</th>
                                     <th>Estado</th>
                                 </tr>
                             </thead>
@@ -162,6 +163,29 @@
             $('.loading-overlay').css('display', 'flex');
         }
 
+        // Función para generar colores únicos para cada proceso
+        function generateProcessColors(processes) {
+            const colors = {};
+            const baseColors = [
+                '#2ecc71', // Verde
+                '#3498db', // Azul
+                '#e74c3c', // Rojo
+                '#f1c40f', // Amarillo
+                '#9b59b6', // Morado
+                '#1abc9c', // Turquesa
+                '#e67e22', // Naranja
+                '#34495e', // Azul oscuro
+                '#16a085', // Verde oscuro
+                '#c0392b'  // Rojo oscuro
+            ];
+            
+            processes.forEach((process, index) => {
+                colors[process.nombre] = baseColors[index % baseColors.length];
+            });
+            
+            return colors;
+        }
+
         function hideLoading() {
             $('.loading-overlay').css('display', 'none');
         }
@@ -202,6 +226,7 @@
             container.empty();
             
             processes.forEach(process => {
+                const prioridadTexto = process.prioridad === 1 ? 'No expulsivo' : 'Expulsivo';
                 const card = $(`
                     <div class="col-md-4">
                         <div class="card process-card" data-pid="${process.pid}">
@@ -210,7 +235,7 @@
                                 <p class="card-text">
                                     PID: ${process.pid}<br>
                                     Usuario: ${process.usuario}<br>
-                                    Prioridad: ${process.prioridad}
+                                    Prioridad: <b>${prioridadTexto}</b>
                                 </p>
                             </div>
                         </div>
@@ -332,16 +357,18 @@
             tbody.empty();
             
             results.forEach(process => {
+                const prioridadTexto = process.prioridad === 1 ? 'No expulsivo' : 'Expulsivo';
                 tbody.append(`
                     <tr>
                         <td>${process.pid}</td>
                         <td>${process.nombre}</td>
                         <td>${process.usuario}</td>
-                        <td>${process.prioridad}</td>
+                        <td>${prioridadTexto}</td>
                         <td>${process.t_llegada}</td>
                         <td>${process.rafaga_total}</td>
                         <td>${process.t_final}</td>
                         <td>${process.turnaround}</td>
+                        <td>${process.rafaga_total}</td>
                         <td>${process.estado}</td>
                     </tr>
                 `);
@@ -352,32 +379,77 @@
 
         // Renderizar diagrama de Gantt
         function renderGanttChart(results) {
-            const tasks = [];
-            let currentTime = 0;
-            
+            const processColors = generateProcessColors(results);
+            const data = [];
+            // Construir una lista de todos los fragmentos de ejecución con su tiempo global
+            let timeline = [];
+            // Recorrer todos los procesos y sus fragmentos
             results.forEach(process => {
-                process.historial.forEach(([estado, duracion]) => {
-                    tasks.push({
-                        Task: process.nombre,
-                        Start: currentTime,
-                        Finish: currentTime + duracion,
-                        Resource: estado
+                let tiempoAcumulado = 0;
+                process.historial.forEach(([estado, duracion], idx) => {
+                    timeline.push({
+                        nombre: process.nombre,
+                        estado: estado,
+                        duracion: duracion,
+                        prioridad: process.prioridad,
+                        color: processColors[process.nombre],
+                        pid: process.pid,
+                        t_llegada: process.t_llegada
                     });
-                    currentTime += duracion;
                 });
             });
-            
-            const data = [{
-                type: 'bar',
-                x: tasks.map(t => t.Finish - t.Start),
-                y: tasks.map(t => t.Task),
-                base: tasks.map(t => t.Start),
-                orientation: 'h',
-                marker: {
-                    color: tasks.map(t => t.Resource === 'Ejecución' ? '#2ecc71' : '#e74c3c')
+            // Ordenar timeline por llegada y luego por ejecución (si es necesario)
+            // Pero para alternancia real, hay que reconstruir el orden de ejecución global
+            // Asumimos que el backend ya alterna correctamente el historial de cada proceso
+            // Ahora, reconstruimos la línea de tiempo global
+            let tiempoGlobal = 0;
+            timeline = [];
+            // Recorrer por rondas hasta que todos los procesos terminen su historial
+            let procesosRestantes = results.map(p => ({
+                nombre: p.nombre,
+                historial: [...p.historial],
+                color: processColors[p.nombre],
+                prioridad: p.prioridad,
+                pid: p.pid,
+                t_llegada: p.t_llegada
+            }));
+            while (procesosRestantes.some(p => p.historial.length > 0)) {
+                for (let i = 0; i < procesosRestantes.length; i++) {
+                    const proc = procesosRestantes[i];
+                    if (proc.historial.length > 0) {
+                        const [estado, duracion] = proc.historial.shift();
+                        timeline.push({
+                            nombre: proc.nombre,
+                            estado: estado,
+                            duracion: duracion,
+                            color: proc.color,
+                            prioridad: proc.prioridad,
+                            pid: proc.pid,
+                            t_llegada: proc.t_llegada,
+                            inicio: tiempoGlobal,
+                            fin: tiempoGlobal + duracion
+                        });
+                        tiempoGlobal += duracion;
+                    }
                 }
-            }];
-            
+            }
+            // Ahora timeline tiene los fragmentos en orden global
+            // Agrupar por proceso para la leyenda
+            const procesosUnicos = [...new Set(results.map(p => p.nombre))];
+            // Crear los datos para Plotly
+            const plotData = timeline.map(frag => ({
+                x: [frag.duracion],
+                y: [frag.nombre],
+                base: [frag.inicio],
+                orientation: 'h',
+                type: 'bar',
+                marker: { color: frag.color },
+                name: frag.nombre,
+                text: [`${frag.estado}<br>${frag.inicio} - ${frag.fin}`],
+                textposition: 'inside',
+                insidetextanchor: 'middle',
+                hovertemplate: `<b>${frag.nombre}</b><br>Estado: ${frag.estado}<br>Inicio: ${frag.inicio}<br>Fin: ${frag.fin}<extra></extra>`
+            }));
             const layout = {
                 title: 'Diagrama de Gantt',
                 barmode: 'stack',
@@ -386,10 +458,14 @@
                 },
                 yaxis: {
                     title: 'Proceso'
+                },
+                legend: {
+                    title: {text: 'Procesos'},
+                    itemsizing: 'constant',
+                    traceorder: 'normal',
                 }
             };
-            
-            Plotly.newPlot('ganttChart', data, layout);
+            Plotly.newPlot('ganttChart', plotData, layout);
         }
 
         // Actualizar controles

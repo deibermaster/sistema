@@ -17,10 +17,19 @@ class Catalogo:
         # Obtener procesos del sistema
         procesos_meta = listar_procesos(n, criterio)
         
+        # Determinar cuántos procesos no expulsivos seleccionar
+        num_no_expulsivos = 4 if n >= 10 else 2
+        
         # Convertir a objetos Proceso
+        procesos_no_expulsivos = 0
         for proc_meta in procesos_meta:
             # Determinar prioridad (0=Expulsivo, 1=No expulsivo)
-            prioridad = 1 if proc_meta.usuario == 'SYSTEM' else 0
+            # Si ya tenemos suficientes no expulsivos, el resto serán expulsivos
+            if procesos_no_expulsivos < num_no_expulsivos:
+                prioridad = 1  # No expulsivo
+                procesos_no_expulsivos += 1
+            else:
+                prioridad = 0  # Expulsivo
             
             # Crear nuevo Proceso
             proceso = Proceso(

@@ -89,7 +89,7 @@ class CatalogUI:
         table_frame = ttk.LabelFrame(content_frame, text="Procesos del Sistema", padding="10")
         table_frame.pack(side="left", fill="both", expand=True)
         
-        columns = ("Catálogo", "PID", "Nombre", "Usuario", "Prioridad", "T.L", "R (ms)", "T.F (ms)", "T.R (ms)", "Estado")
+        columns = ("Catálogo", "PID", "Nombre", "Usuario", "Prioridad", "T.L", "R (ms)", "T.F (ms)", "T.R (ms)", "Unidades", "Estado")
         self.tree = ttk.Treeview(table_frame, columns=columns, show="headings")
         
         # Configurar colores para estados
@@ -197,6 +197,7 @@ class CatalogUI:
                     proc.rafaga_total * int(self.th_var.get()),
                     "-",
                     "-",
+                    proc.rafaga_total,
                     f"{self.estado_iconos[proc.estado]} {proc.estado}"
                 ), tags=(proc.estado,))
                 
@@ -239,6 +240,7 @@ class CatalogUI:
                     proc.rafaga_total * int(self.th_var.get()),
                     "-",
                     "-",
+                    proc.rafaga_total,
                     f"{self.estado_iconos[proc.estado]} {proc.estado}"
                 ), tags=(proc.estado,))
                 self.item_id_por_pid[proc.pid] = item
@@ -364,6 +366,7 @@ class CatalogUI:
                     proc['rafaga_restante'] * self.simulador.th,
                     "-",
                     "-",
+                    proc['rafaga_total'],
                     f"{self.estado_iconos[proc['estado']]} {proc['estado']}"
                 ), tags=(proc['estado'],))
                 
@@ -379,6 +382,7 @@ class CatalogUI:
                     proc['rafaga_total'] * self.simulador.th,
                     proc['t_final'],
                     proc['turnaround'],
+                    proc['rafaga_total'],
                     f"{self.estado_iconos[proc['estado']]} {proc['estado']}"
                 ), tags=(proc['estado'],))
                 
@@ -394,6 +398,7 @@ class CatalogUI:
                     proc['rafaga_restante'] * self.simulador.th,
                     "-",
                     "-",
+                    proc['rafaga_total'],
                     f"{self.estado_iconos[proc['estado']]} {proc['estado']}"
                 ), tags=(proc['estado'],))
                 
